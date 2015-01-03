@@ -70,32 +70,56 @@ def init(qlen, fmaxlen):
     QLEN = qlen
     FMAXLEN = fmaxlen
 
-cdef class DataRow:
-    cdef so.drow *_row
-    def __cinit__(self, fieldc):
-        self._row = so.cq_new_drow(fieldc)
-        if self._row is NULL:
-            raise MemoryError()
+cdef class DataList:
+    cdef so.dlist *_list
+    def __cinit__(self, fieldc, fieldnames, primkey=''):
+        cdef char **cfields = alloc_strarr(fieldnames, blen=FMAXLEN)
+        cprimkey = tou8(primkey)
+        self._list = so.cq_new_dlist(fieldc, cfields, cprimkey)
+        free_all(cfields, len(fieldnames))
+        if self._list is NULL:
+            raise Exception('Memory or value error creating DataList')
 
     def __dealloc__(self):
-        if self._row is not NULL:
-            so.cq_free_drow(self._row)
+        so.cq_free_dlist(self._list)
 
-    def set_values(self, values):
-        cdef char **cvals = alloc_strarr(values, blen=FMAXLEN)
-        rc = so.cq_drow_set(self._row, cvals)
+    def size(self):
+        return so.cq_dlist_size(self._list)
+
+    def add_row(self, values):
+        cdef so.drow *row = so.cq_new_drow(self._list.fieldc)
+        if row is NULL:
+            raise MemoryError()
+        cdef char **cvals
+        try:
+            cvals = alloc_strarr(values, blen=FMAXLEN)
+        except:
+            so.cq_free_drow(row)
+            raise MemoryError()
+        so.cq_drow_set(row, cvals)
+        so.cq_dlist_add(self._list, row)
         free_all(cvals, len(values))
+
+    def remove_field_str(self, key):
+        ckey = tou8(key)
+        rc = so.cq_dlist_remove_field_str(self._list, ckey)
         if rc:
-            raise ValueError()
+            raise KeyError('Field not found in this list')
 
-    def get_size(self):
-        size = self._row.fieldc
-        return size
+    def remove_field_at(self, index):
+        rc = so.cq_dlist_remove_field_at(self._list, index)
+        if rc:
+            raise IndexError()
 
-    def get_values(self):
+    def row_at(self, index):
+        cdef so.drow *row
+        row = so.cq_dlist_at(self._list, index)
+        if row is NULL:
+            raise IndexError()
         values = []
-        for i in range(0, self.get_size()):
-            values.append(fromu8(self._row.values[i]))
+        for i in range(0, row.fieldc):
+            pyval = fromu8(row.values[i])
+            values.append(pyval)
         return values
 
 cdef class DatabaseConnection:
